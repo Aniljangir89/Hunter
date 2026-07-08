@@ -9,6 +9,7 @@ import json
 import os
 import sys
 
+import certifi
 from pymongo import MongoClient
 
 
@@ -33,7 +34,7 @@ def migrate():
 
     # Connect to MongoDB
     print("Connecting to MongoDB Atlas...")
-    client = MongoClient(uri)
+    client = MongoClient(uri, tlsCAFile=certifi.where())
     db = client['job_hunter']
     col = db['contacts']
 
@@ -79,7 +80,7 @@ def migrate():
 
     # Verify
     final_count = col.count_documents({})
-    print(f"\n✅ Migration complete! {final_count} records now in MongoDB Atlas.")
+    print(f"\nMigration complete! {final_count} records now in MongoDB Atlas.")
     print("   Database: job_hunter")
     print("   Collection: contacts")
 

@@ -2,3 +2,4 @@ flask==3.1.*
 dnspython==2.7.*
 gunicorn==23.*
 pymongo[srv]==4.12.*
+certifi

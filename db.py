@@ -2,6 +2,7 @@
 Job Hunter — MongoDB Connection Module
 """
 import os
+import certifi
 from pymongo import MongoClient
 
 _client = None
@@ -18,7 +19,7 @@ def get_db():
                 'MONGODB_URI environment variable is not set. '
                 'Set it to your MongoDB Atlas connection string.'
             )
-        _client = MongoClient(uri)
+        _client = MongoClient(uri, tlsCAFile=certifi.where())
         _db = _client['job_hunter']
     return _db
 
