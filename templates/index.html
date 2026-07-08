@@ -1,0 +1,528 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Job Hunter - HR Data Command Center for managing, validating, and cleaning HR outreach contacts">
+  <title>Job Hunter — HR Data Command Center</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+</head>
+<body>
+
+<div class="app-container">
+
+  <!-- ═══ Sidebar ═══ -->
+  <aside class="sidebar" id="sidebar">
+    <div class="logo">
+      <div class="logo-icon"><i data-lucide="crosshair" class="lucide-icon"></i></div>
+      <div>
+        <div class="logo-text">Job Hunter</div>
+        <div class="logo-subtitle">HR Command Center</div>
+      </div>
+    </div>
+
+    <nav>
+      <div class="nav-section">
+        <div class="nav-label">Overview</div>
+        <div class="nav-item active" data-tab="dashboard" onclick="switchTab('dashboard')">
+          <span class="nav-icon"><i data-lucide="layout-dashboard"></i></span>
+          <span>Dashboard</span>
+        </div>
+        <div class="nav-item" data-tab="contacts" onclick="switchTab('contacts')">
+          <span class="nav-icon"><i data-lucide="contact"></i></span>
+          <span>Contacts</span>
+          <span class="nav-badge" id="contactsBadge">0</span>
+        </div>
+      </div>
+
+      <div class="nav-section">
+        <div class="nav-label">Actions</div>
+        <div class="nav-item" data-tab="add" onclick="switchTab('add')">
+          <span class="nav-icon"><i data-lucide="user-plus"></i></span>
+          <span>Add Contact</span>
+        </div>
+        <div class="nav-item" data-tab="validator" onclick="switchTab('validator')">
+          <span class="nav-icon"><i data-lucide="shield-check"></i></span>
+          <span>Validator</span>
+        </div>
+        <div class="nav-item" data-tab="cleaner" onclick="switchTab('cleaner')">
+          <span class="nav-icon"><i data-lucide="sparkles"></i></span>
+          <span>Data Cleaner</span>
+        </div>
+      </div>
+
+      <div class="nav-section">
+        <div class="nav-label">Insights</div>
+        <div class="nav-item" data-tab="analytics" onclick="switchTab('analytics')">
+          <span class="nav-icon"><i data-lucide="trending-up"></i></span>
+          <span>Analytics</span>
+        </div>
+      </div>
+    </nav>
+
+    <!-- Sidebar footer -->
+    <div style="margin-top: auto; padding: 12px; border-top: 1px solid var(--border-color);">
+      <div class="flex-between" style="margin-bottom: 8px;">
+        <span class="text-sm text-muted">Data Quality</span>
+        <span class="text-sm" id="sidebarQualityScore" style="color: var(--accent-primary); font-weight: 600;">0%</span>
+      </div>
+      <div class="progress-bar-container" style="height: 4px;">
+        <div class="progress-bar" id="sidebarQualityBar" style="width: 0%;"></div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ═══ Main Content ═══ -->
+  <main class="main-content">
+
+    <!-- ─── Dashboard Tab ──────────────────────────── -->
+    <div class="tab-content active" id="tab-dashboard">
+      <div class="page-header">
+        <div>
+          <h1 class="page-title">Dashboard</h1>
+          <p class="page-subtitle">Overview of your HR outreach database</p>
+        </div>
+        <div class="btn-group">
+          <button class="btn btn-secondary" onclick="exportData('csv')"><i data-lucide="download" class="btn-lucide"></i> Export CSV</button>
+          <button class="btn btn-primary" onclick="switchTab('add')"><i data-lucide="plus" class="btn-lucide"></i> Add Contact</button>
+        </div>
+      </div>
+
+      <!-- Stats Cards -->
+      <div class="stats-grid" id="statsGrid">
+        <div class="stat-card">
+          <div class="stat-icon cyan"><i data-lucide="mail"></i></div>
+          <div class="stat-value" id="statTotal">—</div>
+          <div class="stat-label">Total Contacts</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon purple"><i data-lucide="building-2"></i></div>
+          <div class="stat-value" id="statCompanies">—</div>
+          <div class="stat-label">Unique Companies</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon green"><i data-lucide="map-pin"></i></div>
+          <div class="stat-value" id="statCities">—</div>
+          <div class="stat-label">Cities Covered</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon amber"><i data-lucide="copy"></i></div>
+          <div class="stat-value" id="statDuplicates">—</div>
+          <div class="stat-label">Duplicates Found</div>
+          <div class="stat-change negative" id="dupChange">Needs cleanup</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon red"><i data-lucide="user-x"></i></div>
+          <div class="stat-value" id="statPersonal">—</div>
+          <div class="stat-label">Personal Emails</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon blue">
+          <div class="quality-ring">
+            <svg viewBox="0 0 100 100">
+              <defs>
+                <linearGradient id="gradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                  <stop offset="0%" stop-color="#06b6d4"/>
+                  <stop offset="100%" stop-color="#8b5cf6"/>
+                </linearGradient>
+              </defs>
+              <circle class="ring-bg" cx="50" cy="50" r="42"/>
+              <circle class="ring-fill" id="qualityRing" cx="50" cy="50" r="42"/>
+            </svg>
+            <div class="quality-score-text">
+              <div class="quality-score-value" id="qualityScoreValue">0</div>
+              <div class="quality-score-label">Quality</div>
+            </div>
+          </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Charts -->
+      <div class="charts-grid">
+        <div class="card">
+          <div class="card-header">
+            <h3 class="card-title">Contacts by City</h3>
+          </div>
+          <div class="chart-container">
+            <canvas id="citiesChart"></canvas>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-header">
+            <h3 class="card-title">Email Type Distribution</h3>
+          </div>
+          <div class="chart-container">
+            <canvas id="emailTypeChart"></canvas>
+          </div>
+        </div>
+      </div>
+    </div>
+
+
+    <!-- ─── Contacts Tab ──────────────────────────── -->
+    <div class="tab-content" id="tab-contacts">
+      <div class="page-header">
+        <div>
+          <h1 class="page-title">Contacts</h1>
+          <p class="page-subtitle">Browse and manage all HR contacts</p>
+        </div>
+        <div class="btn-group">
+          <button class="btn btn-danger btn-sm" id="bulkDeleteBtn" onclick="bulkDelete()" style="display:none;"><i data-lucide="trash-2" class="btn-lucide"></i> Delete Selected</button>
+          <button class="btn btn-primary btn-sm" onclick="switchTab('add')"><i data-lucide="plus" class="btn-lucide"></i> Add New</button>
+        </div>
+      </div>
+
+      <div class="table-container">
+        <div class="table-toolbar">
+          <div class="search-box">
+            <span class="search-icon"><i data-lucide="search" style="width:16px;height:16px;"></i></span>
+            <input type="text" id="searchInput" placeholder="Search company, email, location..." oninput="debounceSearch()">
+          </div>
+          <select class="filter-select" id="cityFilter" onchange="loadContacts()">
+            <option value="">All Cities</option>
+          </select>
+          <select class="filter-select" id="typeFilter" onchange="loadContacts()">
+            <option value="">All Types</option>
+            <option value="corporate">Corporate</option>
+            <option value="personal">Personal</option>
+            <option value="invalid">Invalid</option>
+          </select>
+          <select class="filter-select" id="statusFilter" onchange="loadContacts()">
+            <option value="">All Statuses</option>
+            <option value="valid_syntax">Valid Syntax</option>
+            <option value="verified">Verified</option>
+            <option value="mx_valid">MX Valid</option>
+            <option value="no_mx">No MX</option>
+            <option value="rejected">Rejected</option>
+            <option value="invalid_syntax">Invalid Syntax</option>
+          </select>
+        </div>
+
+        <div style="overflow-x: auto;">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th class="checkbox-cell"><input type="checkbox" id="selectAll" onchange="toggleSelectAll()"></th>
+                <th>Company</th>
+                <th>Location</th>
+                <th>Email</th>
+                <th>Type</th>
+                <th>Status</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="contactsTable">
+              <!-- Populated by JS -->
+            </tbody>
+          </table>
+        </div>
+
+        <div class="table-footer">
+          <span id="tableInfo">Showing 0 of 0 contacts</span>
+          <div class="pagination" id="pagination"></div>
+        </div>
+      </div>
+    </div>
+
+
+    <!-- ─── Add Contact Tab ───────────────────────── -->
+    <div class="tab-content" id="tab-add">
+      <div class="page-header">
+        <div>
+          <h1 class="page-title">Add Contact</h1>
+          <p class="page-subtitle">Add a new HR contact to the database</p>
+        </div>
+      </div>
+
+      <div class="card" style="max-width: 600px;">
+        <form id="addContactForm" onsubmit="addContact(event)">
+          <div class="form-group">
+            <label class="form-label" for="addCompany">Company Name *</label>
+            <input class="form-input" type="text" id="addCompany" placeholder="e.g., Google" required>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="addLocation">Location</label>
+            <input class="form-input" type="text" id="addLocation" placeholder="e.g., Bangalore / Mumbai">
+            <div class="form-hint">Separate multiple locations with /</div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="addEmail">Email Address *</label>
+            <input class="form-input" type="email" id="addEmail" placeholder="hr@company.com" required oninput="liveValidateEmail()">
+            <div id="emailValidationHint" class="form-hint"></div>
+          </div>
+
+          <div id="liveValidationResult" style="display:none;" class="mt-16"></div>
+
+          <div class="btn-group mt-24">
+            <button type="submit" class="btn btn-primary"><i data-lucide="plus" class="btn-lucide"></i> Add Contact</button>
+            <button type="reset" class="btn btn-secondary" onclick="resetAddForm()">Clear</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+
+    <!-- ─── Validator Tab ─────────────────────────── -->
+    <div class="tab-content" id="tab-validator">
+      <div class="page-header">
+        <div>
+          <h1 class="page-title">Email Validator</h1>
+          <p class="page-subtitle">Verify email addresses with syntax, MX, and SMTP checks</p>
+        </div>
+      </div>
+
+      <!-- Single Validation -->
+      <div class="card mb-24">
+        <div class="card-header">
+          <h3 class="card-title">Single Email Validation</h3>
+        </div>
+        <div class="flex gap-12" style="flex-wrap: wrap;">
+          <div class="search-box" style="flex: 1; min-width: 250px;">
+            <span class="search-icon"><i data-lucide="at-sign" style="width:16px;height:16px;"></i></span>
+            <input type="email" id="validateEmailInput" placeholder="Enter email to validate..." 
+                   onkeypress="if(event.key==='Enter')validateSingleEmail()">
+          </div>
+          <button class="btn btn-primary" onclick="validateSingleEmail()"><i data-lucide="scan-search" class="btn-lucide"></i> Validate</button>
+        </div>
+        <div id="singleValidationResult"></div>
+      </div>
+
+      <!-- Bulk Validation -->
+      <div class="card">
+        <div class="card-header">
+          <h3 class="card-title">Bulk Email Validation</h3>
+        </div>
+        <p class="text-sm text-muted mb-16">
+          Validate all emails in your database. This checks syntax, DNS MX records, and SMTP 
+          verification for each email. This process may take a while for large datasets.
+        </p>
+
+        <div id="bulkValidationControls">
+          <button class="btn btn-primary" id="startBulkBtn" onclick="startBulkValidation()">
+            <i data-lucide="rocket" class="btn-lucide"></i> Start Bulk Validation
+          </button>
+        </div>
+
+        <div id="bulkValidationProgress" style="display: none;">
+          <div class="progress-info">
+            <span id="bulkProgressText">Processing...</span>
+            <span id="bulkProgressPercent">0%</span>
+          </div>
+          <div class="progress-bar-container">
+            <div class="progress-bar" id="bulkProgressBar" style="width: 0%;"></div>
+          </div>
+
+          <div class="stats-grid mt-16" style="grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));">
+            <div class="stat-card" style="padding: 14px;">
+              <div class="stat-value" id="bulkVerified" style="font-size: 22px; color: var(--success);">0</div>
+              <div class="stat-label">Verified</div>
+            </div>
+            <div class="stat-card" style="padding: 14px;">
+              <div class="stat-value" id="bulkMxValid" style="font-size: 22px; color: var(--info);">0</div>
+              <div class="stat-label">MX Valid</div>
+            </div>
+            <div class="stat-card" style="padding: 14px;">
+              <div class="stat-value" id="bulkNoMx" style="font-size: 22px; color: var(--warning);">0</div>
+              <div class="stat-label">No MX</div>
+            </div>
+            <div class="stat-card" style="padding: 14px;">
+              <div class="stat-value" id="bulkRejected" style="font-size: 22px; color: var(--danger);">0</div>
+              <div class="stat-label">Rejected</div>
+            </div>
+          </div>
+
+          <div class="mt-16">
+            <button class="btn btn-danger btn-sm" id="stopBulkBtn" onclick="stopBulkValidation()"><i data-lucide="square" class="btn-lucide"></i> Stop</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+
+    <!-- ─── Data Cleaner Tab ──────────────────────── -->
+    <div class="tab-content" id="tab-cleaner">
+      <div class="page-header">
+        <div>
+          <h1 class="page-title">Data Cleaner</h1>
+          <p class="page-subtitle">Clean, normalize, and transform your data</p>
+        </div>
+      </div>
+
+      <div class="operations-grid">
+        <!-- Deduplication -->
+        <div class="operation-card">
+          <div class="op-icon" style="background: rgba(239, 68, 68, 0.15);"><i data-lucide="copy-minus" style="color: #ef4444;"></i></div>
+          <div class="op-title">Remove Duplicates</div>
+          <div class="op-desc">Find and remove contacts with duplicate email addresses. Preview before applying.</div>
+          <div class="op-btn">
+            <button class="btn btn-secondary btn-sm" onclick="previewDedup()">Preview</button>
+            <button class="btn btn-danger btn-sm" onclick="applyDedup()">Apply</button>
+          </div>
+        </div>
+
+        <!-- Normalize Cities -->
+        <div class="operation-card">
+          <div class="op-icon" style="background: rgba(6, 182, 212, 0.15);"><i data-lucide="map-pin-check-inside" style="color: #06b6d4;"></i></div>
+          <div class="op-title">Normalize Cities</div>
+          <div class="op-desc">Standardize city names (e.g., Bengaluru → Bangalore, Gurugram → Gurgaon).</div>
+          <div class="op-btn">
+            <button class="btn btn-primary btn-sm" onclick="runCleanOperation('normalize_cities')">Run</button>
+          </div>
+        </div>
+
+        <!-- Remove Invalid Emails -->
+        <div class="operation-card">
+          <div class="op-icon" style="background: rgba(245, 158, 11, 0.15);"><i data-lucide="mail-x" style="color: #f59e0b;"></i></div>
+          <div class="op-title">Remove Invalid Emails</div>
+          <div class="op-desc">Remove entries with emails that fail basic syntax validation.</div>
+          <div class="op-btn">
+            <button class="btn btn-warning btn-sm" style="background: var(--warning-bg); color: var(--warning); border: 1px solid rgba(245,158,11,0.2);" 
+                    onclick="runCleanOperation('remove_invalid_emails')">Run</button>
+          </div>
+        </div>
+
+        <!-- Flag Personal Emails -->
+        <div class="operation-card">
+          <div class="op-icon" style="background: rgba(139, 92, 246, 0.15);"><i data-lucide="tag" style="color: #8b5cf6;"></i></div>
+          <div class="op-title">Flag Personal Emails</div>
+          <div class="op-desc">Identify and flag personal emails (Gmail, Yahoo, etc.) vs corporate emails.</div>
+          <div class="op-btn">
+            <button class="btn btn-secondary btn-sm" onclick="runCleanOperation('flag_personal_emails')">Run</button>
+          </div>
+        </div>
+
+        <!-- Trim Whitespace -->
+        <div class="operation-card">
+          <div class="op-icon" style="background: rgba(16, 185, 129, 0.15);"><i data-lucide="scissors" style="color: #10b981;"></i></div>
+          <div class="op-title">Trim Whitespace</div>
+          <div class="op-desc">Remove extra spaces and normalize whitespace in company names.</div>
+          <div class="op-btn">
+            <button class="btn btn-secondary btn-sm" onclick="runCleanOperation('trim_whitespace')">Run</button>
+          </div>
+        </div>
+
+        <!-- Fix Casing -->
+        <div class="operation-card">
+          <div class="op-icon" style="background: rgba(59, 130, 246, 0.15);"><i data-lucide="case-sensitive" style="color: #3b82f6;"></i></div>
+          <div class="op-title">Fix Casing</div>
+          <div class="op-desc">Convert ALL CAPS or all lower company names to proper Title Case.</div>
+          <div class="op-btn">
+            <button class="btn btn-secondary btn-sm" onclick="runCleanOperation('fix_casing')">Run</button>
+          </div>
+        </div>
+
+        <!-- Remove Empty Entries -->
+        <div class="operation-card">
+          <div class="op-icon" style="background: rgba(239, 68, 68, 0.15);"><i data-lucide="trash-2" style="color: #ef4444;"></i></div>
+          <div class="op-title">Remove Empty Entries</div>
+          <div class="op-desc">Remove contacts with missing company names or email addresses.</div>
+          <div class="op-btn">
+            <button class="btn btn-danger btn-sm" onclick="runCleanOperation('remove_empty_entries')">Run</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Changes Preview -->
+      <div id="cleanerResults" class="card mt-24" style="display: none;">
+        <div class="card-header">
+          <h3 class="card-title" id="cleanerResultTitle">Operation Results</h3>
+          <span class="badge badge-info" id="cleanerResultCount">0 changes</span>
+        </div>
+        <div id="cleanerResultBody"></div>
+      </div>
+    </div>
+
+
+    <!-- ─── Analytics Tab ─────────────────────────── -->
+    <div class="tab-content" id="tab-analytics">
+      <div class="page-header">
+        <div>
+          <h1 class="page-title">Analytics</h1>
+          <p class="page-subtitle">Deep insights into your HR outreach database</p>
+        </div>
+      </div>
+
+      <div class="charts-grid">
+        <div class="card">
+          <div class="card-header">
+            <h3 class="card-title">Top 15 Cities</h3>
+          </div>
+          <div class="chart-container" style="height: 400px;">
+            <canvas id="analyticsCitiesChart"></canvas>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-header">
+            <h3 class="card-title">Top 15 Email Domains</h3>
+          </div>
+          <div class="chart-container" style="height: 400px;">
+            <canvas id="analyticsDomainsChart"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <div class="charts-grid mt-24">
+        <div class="card">
+          <div class="card-header">
+            <h3 class="card-title">Validation Status</h3>
+          </div>
+          <div class="chart-container">
+            <canvas id="analyticsValidationChart"></canvas>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-header">
+            <h3 class="card-title">Email Type Breakdown</h3>
+          </div>
+          <div class="chart-container">
+            <canvas id="analyticsTypeChart"></canvas>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+
+<!-- ═══ Edit Modal ═══ -->
+<div class="modal-overlay" id="editModal">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 class="modal-title">Edit Contact</h3>
+      <button class="modal-close" onclick="closeEditModal()"><i data-lucide="x" style="width:16px;height:16px;"></i></button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="editId">
+      <div class="form-group">
+        <label class="form-label" for="editCompany">Company Name</label>
+        <input class="form-input" type="text" id="editCompany">
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="editLocation">Location</label>
+        <input class="form-input" type="text" id="editLocation">
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="editEmail">Email</label>
+        <input class="form-input" type="email" id="editEmail">
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeEditModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveEdit()"><i data-lucide="save" class="btn-lucide"></i> Save Changes</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ Toast Container ═══ -->
+<div class="toast-container" id="toastContainer"></div>
+
+<script src="/static/js/app.js"></script>
+
+</body>
+</html>
