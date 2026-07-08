@@ -2,7 +2,7 @@
 Job Hunter — MongoDB Connection Module
 """
 import os
-import sys
+import certifi
 from pymongo import MongoClient, ReturnDocument
 
 _client = None
@@ -20,22 +20,13 @@ def get_db():
                 'Set it to your MongoDB Atlas connection string.'
             )
 
-        kwargs = {
-            'serverSelectionTimeoutMS': 5000,
-            'connectTimeoutMS': 5000,
-            'socketTimeoutMS': 10000,
-        }
-
-        # On Windows, use certifi for SSL certs.
-        # On Linux (Vercel), system certs work fine.
-        if sys.platform == 'win32':
-            try:
-                import certifi
-                kwargs['tlsCAFile'] = certifi.where()
-            except ImportError:
-                pass
-
-        _client = MongoClient(uri, **kwargs)
+        _client = MongoClient(
+            uri,
+            tlsCAFile=certifi.where(),
+            serverSelectionTimeoutMS=5000,
+            connectTimeoutMS=5000,
+            socketTimeoutMS=10000,
+        )
         _db = _client['job_hunter']
     return _db
 
