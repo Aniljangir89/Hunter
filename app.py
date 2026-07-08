@@ -1,6 +1,6 @@
 """
 Job Hunter — HR Data Command Center
-Flask Backend API Server
+Flask Backend API Server (MongoDB Edition)
 """
 import json
 import os
@@ -13,12 +13,11 @@ from datetime import datetime
 from threading import Thread, Lock
 
 from flask import Flask, request, jsonify, render_template, send_file
+
 import dns.resolver
+from db import get_contacts_collection, get_next_id
 
 app = Flask(__name__, static_folder='static', template_folder='templates')
-
-DATA_FILE = 'data.json'
-data_lock = Lock()
 
 # ─── Personal email domains ───────────────────────────────────────────
 PERSONAL_DOMAINS = {
@@ -50,31 +49,8 @@ CITY_NORMALIZE = {
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# DATA HELPERS
+# HELPERS
 # ═══════════════════════════════════════════════════════════════════════
-
-def load_data():
-    """Load contacts from JSON file."""
-    with data_lock:
-        if os.path.exists(DATA_FILE):
-            with open(DATA_FILE, 'r', encoding='utf-8') as f:
-                return json.load(f)
-    return []
-
-
-def save_data(records):
-    """Save contacts to JSON file."""
-    with data_lock:
-        with open(DATA_FILE, 'w', encoding='utf-8') as f:
-            json.dump(records, f, ensure_ascii=False, indent=2)
-
-
-def get_next_id(records):
-    """Get the next available ID."""
-    if not records:
-        return 1
-    return max(r['id'] for r in records) + 1
-
 
 def normalize_city(city):
     """Normalize a city name."""
@@ -94,6 +70,14 @@ def is_valid_email_syntax(email):
     """Check email syntax with regex."""
     pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
     return bool(re.match(pattern, str(email)))
+
+
+def serialize_contact(doc):
+    """Convert a MongoDB document to a JSON-serializable dict."""
+    if doc is None:
+        return None
+    doc.pop('_id', None)  # Remove MongoDB ObjectId
+    return doc
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -194,44 +178,47 @@ def index():
 @app.route('/api/contacts', methods=['GET'])
 def get_contacts():
     """List contacts with pagination, search, and filters."""
-    records = load_data()
+    col = get_contacts_collection()
+
+    # Build MongoDB query filter
+    query = {}
 
     # Search
     search = request.args.get('search', '').lower().strip()
     if search:
-        records = [r for r in records if
-                   search in r.get('company', '').lower() or
-                   search in r.get('email', '').lower() or
-                   search in r.get('location', '').lower()]
+        query['$or'] = [
+            {'company': {'$regex': search, '$options': 'i'}},
+            {'email': {'$regex': search, '$options': 'i'}},
+            {'location': {'$regex': search, '$options': 'i'}}
+        ]
 
     # Filter by city
     city = request.args.get('city', '').strip()
     if city:
-        records = [r for r in records if city.lower() in
-                   [loc.lower() for loc in r.get('locations', [])]]
+        query['locations'] = {'$regex': f'^{re.escape(city)}$', '$options': 'i'}
 
     # Filter by email type
     email_type = request.args.get('email_type', '').strip()
     if email_type:
-        records = [r for r in records if r.get('email_type') == email_type]
+        query['email_type'] = email_type
 
     # Filter by validation status
     val_status = request.args.get('validation_status', '').strip()
     if val_status:
-        records = [r for r in records if
-                   r.get('validation', {}).get('status') == val_status]
+        query['validation.status'] = val_status
 
-    total = len(records)
+    total = col.count_documents(query)
 
     # Pagination
     page = int(request.args.get('page', 1))
     per_page = int(request.args.get('per_page', 50))
-    start = (page - 1) * per_page
-    end = start + per_page
-    paginated = records[start:end]
+    skip = (page - 1) * per_page
+
+    cursor = col.find(query, {'_id': 0}).skip(skip).limit(per_page)
+    contacts = list(cursor)
 
     return jsonify({
-        'contacts': paginated,
+        'contacts': contacts,
         'total': total,
         'page': page,
         'per_page': per_page,
@@ -250,10 +237,10 @@ def add_contact():
     if not company or not email:
         return jsonify({'error': 'Company and email are required'}), 400
 
-    records = load_data()
+    col = get_contacts_collection()
 
     # Check for duplicate email
-    if any(r['email'] == email for r in records):
+    if col.find_one({'email': email}):
         return jsonify({'error': f'Email {email} already exists'}), 409
 
     domain = email.split('@')[-1] if '@' in email else ''
@@ -265,7 +252,7 @@ def add_contact():
     syntax_valid = is_valid_email_syntax(email)
 
     new_record = {
-        'id': get_next_id(records),
+        'id': get_next_id(),
         'company': company,
         'location': location,
         'locations': normalized,
@@ -282,57 +269,63 @@ def add_contact():
         'is_cleaned': False
     }
 
-    records.append(new_record)
-    save_data(records)
+    col.insert_one(new_record)
 
-    return jsonify({'message': 'Contact added', 'contact': new_record}), 201
+    return jsonify({
+        'message': 'Contact added',
+        'contact': serialize_contact(new_record)
+    }), 201
 
 
 @app.route('/api/contacts/<int:contact_id>', methods=['PUT'])
 def update_contact(contact_id):
     """Update an existing contact."""
     data = request.get_json()
-    records = load_data()
+    col = get_contacts_collection()
 
-    contact = next((r for r in records if r['id'] == contact_id), None)
+    contact = col.find_one({'id': contact_id})
     if not contact:
         return jsonify({'error': 'Contact not found'}), 404
 
+    update_fields = {}
+
     if 'company' in data:
-        contact['company'] = data['company'].strip()
+        update_fields['company'] = data['company'].strip()
     if 'location' in data:
-        contact['location'] = data['location'].strip()
+        update_fields['location'] = data['location'].strip()
         raw_locs = [l.strip() for l in data['location'].replace(',', '/').split('/') if l.strip()]
-        contact['locations'] = [normalize_city(l) for l in raw_locs] or ['Unknown']
+        update_fields['locations'] = [normalize_city(l) for l in raw_locs] or ['Unknown']
     if 'email' in data:
         new_email = data['email'].strip().lower()
         # Check duplicate (excluding self)
-        if any(r['email'] == new_email and r['id'] != contact_id for r in records):
+        existing = col.find_one({'email': new_email, 'id': {'$ne': contact_id}})
+        if existing:
             return jsonify({'error': f'Email {new_email} already exists'}), 409
-        contact['email'] = new_email
-        contact['domain'] = new_email.split('@')[-1] if '@' in new_email else ''
-        contact['email_type'] = classify_email(contact['domain'])
-        contact['validation'] = {
+        update_fields['email'] = new_email
+        update_fields['domain'] = new_email.split('@')[-1] if '@' in new_email else ''
+        update_fields['email_type'] = classify_email(update_fields['domain'])
+        update_fields['validation'] = {
             'syntax': is_valid_email_syntax(new_email),
             'mx': None, 'smtp': None,
             'status': 'valid_syntax' if is_valid_email_syntax(new_email) else 'invalid_syntax'
         }
 
-    save_data(records)
-    return jsonify({'message': 'Contact updated', 'contact': contact})
+    if update_fields:
+        col.update_one({'id': contact_id}, {'$set': update_fields})
+
+    updated = col.find_one({'id': contact_id}, {'_id': 0})
+    return jsonify({'message': 'Contact updated', 'contact': updated})
 
 
 @app.route('/api/contacts/<int:contact_id>', methods=['DELETE'])
 def delete_contact(contact_id):
     """Delete a contact."""
-    records = load_data()
-    original_len = len(records)
-    records = [r for r in records if r['id'] != contact_id]
+    col = get_contacts_collection()
+    result = col.delete_one({'id': contact_id})
 
-    if len(records) == original_len:
+    if result.deleted_count == 0:
         return jsonify({'error': 'Contact not found'}), 404
 
-    save_data(records)
     return jsonify({'message': 'Contact deleted'})
 
 
@@ -340,15 +333,15 @@ def delete_contact(contact_id):
 def bulk_delete():
     """Delete multiple contacts by IDs."""
     data = request.get_json()
-    ids_to_delete = set(data.get('ids', []))
+    ids_to_delete = list(data.get('ids', []))
 
-    records = load_data()
-    original_len = len(records)
-    records = [r for r in records if r['id'] not in ids_to_delete]
-    deleted = original_len - len(records)
+    col = get_contacts_collection()
+    result = col.delete_many({'id': {'$in': ids_to_delete}})
 
-    save_data(records)
-    return jsonify({'message': f'{deleted} contacts deleted', 'deleted': deleted})
+    return jsonify({
+        'message': f'{result.deleted_count} contacts deleted',
+        'deleted': result.deleted_count
+    })
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -366,17 +359,19 @@ def validate_single_email():
 
     result = validate_email_full(email)
 
-    # Update in data if this email exists
-    records = load_data()
-    for r in records:
-        if r['email'] == email:
-            r['validation'] = {
+    # Update in database if this email exists
+    col = get_contacts_collection()
+    col.update_many(
+        {'email': email},
+        {'$set': {
+            'validation': {
                 'syntax': result['syntax'],
                 'mx': result['mx'],
                 'smtp': result['smtp'],
                 'status': result['status']
             }
-    save_data(records)
+        }}
+    )
 
     return jsonify(result)
 
@@ -395,7 +390,8 @@ bulk_lock = Lock()
 def run_bulk_validation():
     """Background worker for bulk email validation."""
     global bulk_validation_state
-    records = load_data()
+    col = get_contacts_collection()
+    records = list(col.find({}, {'_id': 0, 'id': 1, 'email': 1}))
 
     with bulk_lock:
         bulk_validation_state['total'] = len(records)
@@ -411,12 +407,17 @@ def run_bulk_validation():
 
         try:
             result = validate_email_full(record['email'])
-            record['validation'] = {
-                'syntax': result['syntax'],
-                'mx': result['mx'],
-                'smtp': result['smtp'],
-                'status': result['status']
-            }
+            col.update_one(
+                {'id': record['id']},
+                {'$set': {
+                    'validation': {
+                        'syntax': result['syntax'],
+                        'mx': result['mx'],
+                        'smtp': result['smtp'],
+                        'status': result['status']
+                    }
+                }}
+            )
             with bulk_lock:
                 status = result['status']
                 if status in bulk_validation_state['results']:
@@ -430,11 +431,6 @@ def run_bulk_validation():
         with bulk_lock:
             bulk_validation_state['processed'] = i + 1
 
-        # Save progress every 50 records
-        if (i + 1) % 50 == 0:
-            save_data(records)
-
-    save_data(records)
     with bulk_lock:
         bulk_validation_state['running'] = False
 
@@ -478,11 +474,11 @@ def clean_data():
     """Run cleaning operations on the data."""
     data = request.get_json()
     operation = data.get('operation', '')
-    records = load_data()
+    col = get_contacts_collection()
     changes = []
 
     if operation == 'normalize_cities':
-        for r in records:
+        for r in col.find({}, {'_id': 0}):
             raw_locs = [l.strip() for l in r['location'].replace(',', '/').split('/') if l.strip()]
             new_locs = [normalize_city(l) for l in raw_locs]
             if new_locs != r.get('locations', []):
@@ -492,12 +488,13 @@ def clean_data():
                     'old': r.get('locations', []),
                     'new': new_locs
                 })
-                r['locations'] = new_locs
-                r['is_cleaned'] = True
+                col.update_one(
+                    {'id': r['id']},
+                    {'$set': {'locations': new_locs, 'is_cleaned': True}}
+                )
 
     elif operation == 'remove_invalid_emails':
-        valid_records = []
-        for r in records:
+        for r in col.find({}, {'_id': 0}):
             if not is_valid_email_syntax(r['email']):
                 changes.append({
                     'id': r['id'],
@@ -505,12 +502,10 @@ def clean_data():
                     'reason': 'invalid email syntax',
                     'email': r['email']
                 })
-            else:
-                valid_records.append(r)
-        records = valid_records
+                col.delete_one({'id': r['id']})
 
     elif operation == 'flag_personal_emails':
-        for r in records:
+        for r in col.find({}, {'_id': 0}):
             old_type = r.get('email_type', '')
             new_type = classify_email(r.get('domain', ''))
             if old_type != new_type:
@@ -520,12 +515,12 @@ def clean_data():
                     'old': old_type,
                     'new': new_type
                 })
-            r['email_type'] = new_type
+            col.update_one({'id': r['id']}, {'$set': {'email_type': new_type}})
 
     elif operation == 'trim_whitespace':
-        for r in records:
+        for r in col.find({}, {'_id': 0}):
             old_company = r['company']
-            new_company = ' '.join(r['company'].split())  # Normalize whitespace
+            new_company = ' '.join(r['company'].split())
             if old_company != new_company:
                 changes.append({
                     'id': r['id'],
@@ -533,13 +528,14 @@ def clean_data():
                     'old': old_company,
                     'new': new_company
                 })
-                r['company'] = new_company
-                r['is_cleaned'] = True
+                col.update_one(
+                    {'id': r['id']},
+                    {'$set': {'company': new_company, 'is_cleaned': True}}
+                )
 
     elif operation == 'fix_casing':
-        for r in records:
+        for r in col.find({}, {'_id': 0}):
             old_company = r['company']
-            # Title case but preserve common abbreviations
             new_company = r['company'].strip()
             if new_company == new_company.upper() or new_company == new_company.lower():
                 new_company = new_company.title()
@@ -550,12 +546,13 @@ def clean_data():
                     'old': old_company,
                     'new': new_company
                 })
-                r['company'] = new_company
-                r['is_cleaned'] = True
+                col.update_one(
+                    {'id': r['id']},
+                    {'$set': {'company': new_company, 'is_cleaned': True}}
+                )
 
     elif operation == 'remove_empty_entries':
-        valid_records = []
-        for r in records:
+        for r in col.find({}, {'_id': 0}):
             if not r['email'] or not r['company'] or r['company'] == 'Unknown':
                 changes.append({
                     'id': r['id'],
@@ -564,19 +561,17 @@ def clean_data():
                     'company': r['company'],
                     'email': r['email']
                 })
-            else:
-                valid_records.append(r)
-        records = valid_records
+                col.delete_one({'id': r['id']})
 
     else:
         return jsonify({'error': f'Unknown operation: {operation}'}), 400
 
-    save_data(records)
+    total_records = col.count_documents({})
     return jsonify({
         'message': f'Cleaning operation "{operation}" completed',
         'changes_count': len(changes),
         'changes': changes[:100],  # Return first 100 changes for preview
-        'total_records': len(records)
+        'total_records': total_records
     })
 
 
@@ -586,30 +581,42 @@ def deduplicate():
     data = request.get_json()
     preview_only = data.get('preview', True)
 
-    records = load_data()
-    seen_emails = {}
+    col = get_contacts_collection()
+
+    # Use aggregation to find duplicates
+    pipeline = [
+        {'$group': {
+            '_id': {'$toLower': '$email'},
+            'count': {'$sum': 1},
+            'docs': {'$push': {'id': '$id', 'company': '$company',
+                               'email': '$email', 'location': '$location'}}
+        }},
+        {'$match': {'count': {'$gt': 1}}}
+    ]
+
     duplicates = []
-    unique_records = []
+    ids_to_remove = []
 
-    for r in records:
-        email = r['email'].lower().strip()
-        if email in seen_emails:
+    for group in col.aggregate(pipeline):
+        docs = group['docs']
+        original = docs[0]  # Keep the first one
+        for dup in docs[1:]:
             duplicates.append({
-                'duplicate': r,
-                'original_id': seen_emails[email]
+                'duplicate': dup,
+                'original_id': original['id']
             })
-        else:
-            seen_emails[email] = r['id']
-            unique_records.append(r)
+            ids_to_remove.append(dup['id'])
 
-    if not preview_only:
-        save_data(unique_records)
+    if not preview_only and ids_to_remove:
+        col.delete_many({'id': {'$in': ids_to_remove}})
+
+    records_after = col.count_documents({})
 
     return jsonify({
         'message': 'Deduplication ' + ('preview' if preview_only else 'applied'),
         'duplicates_found': len(duplicates),
         'duplicates': duplicates[:100],  # First 100 for preview
-        'records_after': len(unique_records),
+        'records_after': records_after,
         'applied': not preview_only
     })
 
@@ -621,56 +628,73 @@ def deduplicate():
 @app.route('/api/stats', methods=['GET'])
 def get_stats():
     """Get dashboard analytics."""
-    records = load_data()
+    col = get_contacts_collection()
 
     # Basic counts
-    total = len(records)
-    unique_companies = len(set(r['company'] for r in records))
+    total = col.count_documents({})
+    if total == 0:
+        return jsonify({
+            'total_contacts': 0, 'unique_companies': 0,
+            'unique_cities': 0, 'duplicate_count': 0,
+            'quality_score': 0, 'email_types': {},
+            'validation_statuses': {}, 'top_cities': [],
+            'top_domains': [], 'all_cities': []
+        })
 
-    # City distribution
-    cities = {}
-    for r in records:
-        for loc in r.get('locations', ['Unknown']):
-            cities[loc] = cities.get(loc, 0) + 1
+    unique_companies = len(col.distinct('company'))
+
+    # City distribution via aggregation
+    city_pipeline = [
+        {'$unwind': '$locations'},
+        {'$group': {'_id': '$locations', 'count': {'$sum': 1}}},
+        {'$sort': {'count': -1}}
+    ]
+    city_results = list(col.aggregate(city_pipeline))
+    cities = {r['_id']: r['count'] for r in city_results}
 
     # Email type distribution
-    email_types = {}
-    for r in records:
-        t = r.get('email_type', 'unknown')
-        email_types[t] = email_types.get(t, 0) + 1
+    email_type_pipeline = [
+        {'$group': {'_id': {'$ifNull': ['$email_type', 'unknown']}, 'count': {'$sum': 1}}}
+    ]
+    email_types = {r['_id']: r['count'] for r in col.aggregate(email_type_pipeline)}
 
     # Validation status distribution
-    val_statuses = {}
-    for r in records:
-        s = r.get('validation', {}).get('status', 'pending')
-        val_statuses[s] = val_statuses.get(s, 0) + 1
+    val_pipeline = [
+        {'$group': {
+            '_id': {'$ifNull': ['$validation.status', 'pending']},
+            'count': {'$sum': 1}
+        }}
+    ]
+    val_statuses = {r['_id']: r['count'] for r in col.aggregate(val_pipeline)}
 
     # Domain distribution
-    domains = {}
-    for r in records:
-        d = r.get('domain', '')
-        if d:
-            domains[d] = domains.get(d, 0) + 1
+    domain_pipeline = [
+        {'$match': {'domain': {'$ne': ''}}},
+        {'$group': {'_id': '$domain', 'count': {'$sum': 1}}},
+        {'$sort': {'count': -1}},
+        {'$limit': 20}
+    ]
+    top_domains = [[r['_id'], r['count']] for r in col.aggregate(domain_pipeline)]
 
-    # Top cities (sorted by count)
-    top_cities = sorted(cities.items(), key=lambda x: -x[1])[:20]
-
-    # Top domains
-    top_domains = sorted(domains.items(), key=lambda x: -x[1])[:20]
+    # Top cities
+    top_cities = [[c, cnt] for c, cnt in sorted(cities.items(), key=lambda x: -x[1])[:20]]
 
     # Duplicate count
-    emails_seen = set()
-    dupe_count = 0
-    for r in records:
-        if r['email'] in emails_seen:
-            dupe_count += 1
-        else:
-            emails_seen.add(r['email'])
+    dup_pipeline = [
+        {'$group': {'_id': '$email', 'count': {'$sum': 1}}},
+        {'$match': {'count': {'$gt': 1}}},
+        {'$group': {'_id': None, 'total_dupes': {'$sum': {'$subtract': ['$count', 1]}}}}
+    ]
+    dup_result = list(col.aggregate(dup_pipeline))
+    dupe_count = dup_result[0]['total_dupes'] if dup_result else 0
 
     # Data quality score (0-100)
-    syntax_valid = sum(1 for r in records if r.get('validation', {}).get('syntax'))
+    syntax_valid = col.count_documents({'validation.syntax': True})
     corporate = email_types.get('corporate', 0)
-    non_empty = sum(1 for r in records if r['email'] and r['company'] != 'Unknown')
+    non_empty = col.count_documents({
+        'email': {'$ne': ''},
+        'company': {'$ne': 'Unknown'}
+    })
 
     quality_score = 0
     if total > 0:
@@ -682,9 +706,7 @@ def get_stats():
         )
 
     # Unique cities list for filter dropdown
-    all_cities = sorted(set(
-        loc for r in records for loc in r.get('locations', [])
-    ))
+    all_cities = sorted(col.distinct('locations'))
 
     return jsonify({
         'total_contacts': total,
@@ -703,12 +725,13 @@ def get_stats():
 @app.route('/api/export', methods=['GET'])
 def export_data():
     """Export contacts as CSV."""
-    records = load_data()
+    col = get_contacts_collection()
+    records = list(col.find({}, {'_id': 0}))
     fmt = request.args.get('format', 'csv')
 
     if fmt == 'json':
         output = io.BytesIO()
-        output.write(json.dumps(records, ensure_ascii=False, indent=2).encode('utf-8'))
+        output.write(json.dumps(records, ensure_ascii=False, indent=2, default=str).encode('utf-8'))
         output.seek(0)
         return send_file(output, mimetype='application/json',
                          as_attachment=True,
