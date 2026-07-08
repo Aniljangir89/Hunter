@@ -3,7 +3,7 @@ Job Hunter — MongoDB Connection Module
 """
 import os
 import certifi
-from pymongo import MongoClient
+from pymongo import MongoClient, ReturnDocument
 
 _client = None
 _db = None
@@ -19,7 +19,13 @@ def get_db():
                 'MONGODB_URI environment variable is not set. '
                 'Set it to your MongoDB Atlas connection string.'
             )
-        _client = MongoClient(uri, tlsCAFile=certifi.where())
+        _client = MongoClient(
+            uri,
+            tlsCAFile=certifi.where(),
+            serverSelectionTimeoutMS=5000,
+            connectTimeoutMS=5000,
+            socketTimeoutMS=10000
+        )
         _db = _client['job_hunter']
     return _db
 
@@ -41,6 +47,6 @@ def get_next_id():
         {'_id': 'contact_id'},
         {'$inc': {'seq': 1}},
         upsert=True,
-        return_document=True
+        return_document=ReturnDocument.AFTER
     )
     return result['seq']

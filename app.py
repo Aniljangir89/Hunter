@@ -19,6 +19,17 @@ from db import get_contacts_collection, get_next_id
 
 app = Flask(__name__, static_folder='static', template_folder='templates')
 
+
+@app.route('/api/health')
+def health_check():
+    """Health check endpoint to debug MongoDB connectivity."""
+    try:
+        col = get_contacts_collection()
+        count = col.count_documents({})
+        return jsonify({'status': 'ok', 'mongodb': 'connected', 'contacts_count': count})
+    except Exception as e:
+        return jsonify({'status': 'error', 'error': str(e)}), 500
+
 # ─── Personal email domains ───────────────────────────────────────────
 PERSONAL_DOMAINS = {
     'gmail.com', 'yahoo.com', 'yahoo.in', 'yahoo.co.in',
